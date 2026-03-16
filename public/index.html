@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GEWiz — FP&A Platform | Grant Thornton</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-layout">
+
+  <!-- ═══════ SIDEBAR ═══════ -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="logo-mark">GT</div>
+      <div class="logo-text">
+        <span class="logo-gt">Grant Thornton</span>
+        <span class="logo-product">GEWiz</span>
+      </div>
+      <span class="pilot-pill">PILOT</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 8a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1v-4zm8-8a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V4zm0 8a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
+        Dashboard
+      </button>
+      <button class="nav-item" data-tab="input" onclick="switchTab('input')">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
+        Data Input
+      </button>
+      <button class="nav-item" data-tab="fpna" onclick="switchTab('fpna')">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 10-2 0v3a1 1 0 102 0v-3zm2-3a1 1 0 011 1v5a1 1 0 11-2 0v-5a1 1 0 011-1zm4-1a1 1 0 10-2 0v7a1 1 0 102 0V8z" clip-rule="evenodd"/></svg>
+        FP&amp;A Engine
+      </button>
+      <button class="nav-item" data-tab="ai" onclick="switchTab('ai')">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.998.186-1.565.465-2.058a4 4 0 10-4.93 0C7.814 12.435 7.985 13.002 8 14h4z"/></svg>
+        AI Insights
+        <span class="ai-badge">AI</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-info">
+        <div class="info-row"><span class="dot green"></span><span>FY 2025–26</span></div>
+        <div class="info-row"><span class="dot purple"></span><span>5 schools · 2,780 pupils</span></div>
+      </div>
+      <div class="powered-by">✦ Powered by Gemini AI</div>
+    </div>
+  </aside>
+
+  <!-- ═══════ MAIN ═══════ -->
+  <div class="main-wrapper">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span id="topbar-title" class="topbar-title">Dashboard</span>
+        <span class="topbar-sub">Academy Trust Group · Apr–Dec 2025 (YTD)</span>
+      </div>
+      <div class="topbar-right">
+        <select id="school-select" class="gt-select" onchange="onSchoolChange(this.value)">
+          <option value="group">Academy Trust Group</option>
+          <option value="greenfield">Greenfield Academy</option>
+          <option value="oakwood">Oakwood School</option>
+          <option value="riverside">Riverside College</option>
+          <option value="hillcrest">Hillcrest Primary</option>
+          <option value="lakeside">Lakeside Free School</option>
+        </select>
+      </div>
+    </header>
+
+    <main class="main-content">
+
+      <!-- ═══ DASHBOARD ═══ -->
+      <section id="tab-dashboard" class="tab-content active">
+        <div id="dash-loading" class="loading-state">Loading…</div>
+        <div id="dash-content" style="display:none">
+          <div class="kpi-grid" id="dash-kpis"></div>
+          <div class="ai-strip" id="dash-ai-strip"></div>
+          <div class="dash-charts">
+            <div class="chart-card">
+              <div class="chart-header"><span class="chart-title">Revenue vs Budget</span><span class="chart-sub">Monthly · Apr–Mar</span></div>
+              <canvas id="chart-revenue"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-header"><span class="chart-title">Expenditure Breakdown</span><span class="chart-sub">YTD Actual</span></div>
+              <canvas id="chart-expense"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-header"><span class="chart-title">Monthly Surplus / (Deficit)</span><span class="chart-sub">Actual vs Budget</span></div>
+              <canvas id="chart-surplus"></canvas>
+            </div>
+            <div class="chart-card">
+              <div class="chart-header"><span class="chart-title">Variance by Category</span><span class="chart-sub">YTD € vs budget</span></div>
+              <canvas id="chart-variance"></canvas>
+            </div>
+          </div>
+          <div class="section-header">
+            <span class="section-title">School Performance Summary</span>
+          </div>
+          <div class="card">
+            <table class="gt-table">
+              <thead><tr>
+                <th>School</th><th>Phase</th><th class="num">Pupils</th>
+                <th class="num">YTD Revenue</th><th class="num">YTD Expenditure</th>
+                <th class="num">YTD Surplus</th><th class="num">Var %</th>
+              </tr></thead>
+              <tbody id="dash-schools-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ DATA INPUT ═══ -->
+      <section id="tab-input" class="tab-content">
+        <div class="input-section">
+          <div class="section-header">
+            <span class="section-title">School Pupil Numbers &amp; Funding Rates</span>
+            <span class="section-sub">Edit values and click Apply to recalculate</span>
+          </div>
+          <div class="card">
+            <table class="gt-table">
+              <thead><tr>
+                <th>School</th><th>Phase</th>
+                <th class="num">Pupils</th>
+                <th class="num">Per-Pupil Rate (€)</th>
+                <th class="num">Projected GAG</th>
+              </tr></thead>
+              <tbody id="input-schools-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="input-section">
+          <div class="section-header" style="margin-top:28px">
+            <span class="section-title">Budget Allocation</span>
+            <span class="section-sub">% of total revenue allocated to each expenditure category</span>
+          </div>
+          <div class="ratios-grid" id="ratios-grid"></div>
+        </div>
+
+        <div class="input-actions">
+          <button class="gt-btn gt-btn--primary" id="btn-apply" onclick="applyAssumptions()">Apply &amp; Recalculate</button>
+          <button class="gt-btn gt-btn--ghost" onclick="resetAssumptions()">Reset to Defaults</button>
+          <span id="apply-status" class="apply-status"></span>
+        </div>
+      </section>
+
+      <!-- ═══ FP&A ENGINE ═══ -->
+      <section id="tab-fpna" class="tab-content">
+        <div id="fpna-loading" class="loading-state">Loading P&amp;L…</div>
+        <div id="fpna-content" style="display:none">
+          <div class="kpi-grid" id="fpna-kpis"></div>
+          <div class="section-header">
+            <span class="section-title">Profit &amp; Loss — Budget vs Actuals vs Forecast</span>
+            <span class="section-sub">Apr 2025 – Mar 2026 · ᶠ = Forecast</span>
+          </div>
+          <div class="card" style="overflow-x:auto">
+            <table class="gt-table fpna-table">
+              <thead id="fpna-thead"></thead>
+              <tbody id="fpna-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ AI INSIGHTS ═══ -->
+      <section id="tab-ai" class="tab-content">
+        <div id="ai-loading" class="loading-state">Loading variance data…</div>
+        <div id="ai-content" style="display:none">
+          <div class="ai-layout">
+            <div class="ai-main">
+              <div class="section-header">
+                <span class="section-title">Significant Variances — YTD</span>
+                <span id="ai-entity-label" class="section-sub"></span>
+              </div>
+              <div class="card">
+                <table class="gt-table">
+                  <thead><tr>
+                    <th>Category</th><th>Type</th>
+                    <th class="num">Budget YTD</th><th class="num">Actual YTD</th>
+                    <th class="num">Variance €</th><th class="num">Var %</th>
+                    <th>Signal</th>
+                  </tr></thead>
+                  <tbody id="variance-tbody"></tbody>
+                </table>
+              </div>
+              <div class="ai-actions">
+                <button class="gt-btn gt-btn--primary" id="btn-explain" onclick="explainVariance()">
+                  ✦ Explain with AI
+                </button>
+                <button class="gt-btn gt-btn--ghost" id="btn-board" onclick="generateBoardCommentary()">
+                  📄 Board Commentary
+                </button>
+              </div>
+            </div>
+            <div class="ai-panel">
+              <div class="ai-panel-head">
+                <span class="ai-panel-icon">✦</span>
+                <span class="ai-panel-title">AI Analysis</span>
+                <span id="risk-badge" class="risk-badge" style="margin-left:auto"></span>
+              </div>
+              <div id="ai-panel-body" class="ai-panel-body">
+                <div class="ai-placeholder">
+                  <div style="font-size:28px;margin-bottom:10px;opacity:.3">✦</div>
+                  <div style="font-weight:600;margin-bottom:6px;color:var(--gt-muted)">Ready to analyse</div>
+                  <div style="font-size:12.5px;color:var(--gt-muted)">Click "Explain with AI" for a detailed variance narrative, or "Board Commentary" for a formal report.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+<script src="/js/app.js"></script>
+</body>
+</html>
