@@ -21,13 +21,13 @@ app.add_middleware(
 )
 
 # ── Gemini setup ────────────────────────────────────────────────────────────
-gemini_model = None
+gemini_client = None
+GEMINI_MODEL = "gemini-2.0-flash"
 try:
-    import google.generativeai as genai
+    from google import genai as google_genai
     api_key = os.getenv("GEMINI_API_KEY", "")
     if api_key and api_key != "your_gemini_api_key_here":
-        genai.configure(api_key=api_key)
-        gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+        gemini_client = google_genai.Client(api_key=api_key)
 except Exception:
     pass
 
@@ -36,35 +36,34 @@ MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", 
 ACTUAL_MONTHS = 9  # Apr–Dec 2025 have actuals; Jan–Mar 2026 are forecast
 
 SCHOOLS = [
-    {"id": "greenfield", "name": "Greenfield Academy",     "pupils": 650, "phase": "Secondary"},
-    {"id": "oakwood",    "name": "Oakwood School",          "pupils": 480, "phase": "Primary"},
-    {"id": "riverside",  "name": "Riverside College",       "pupils": 820, "phase": "Secondary"},
-    {"id": "hillcrest",  "name": "Hillcrest Primary",       "pupils": 310, "phase": "Primary"},
-    {"id": "lakeside",   "name": "Lakeside Free School",    "pupils": 520, "phase": "All-through"},
+    {"id": "aes_nicosia", "name": "Alpha English School Nicosia", "headcount": 650, "segment": "Secondary", "city": "Nicosia"},
+    {"id": "aps_nicosia", "name": "Alpha Primary School Nicosia", "headcount": 480, "segment": "Primary", "city": "Nicosia"},
+    {"id": "aes_limassol", "name": "Alpha English School Limassol", "headcount": 820, "segment": "Secondary", "city": "Limassol"},
+    {"id": "aes_larnaca", "name": "Alpha English School Larnaca", "headcount": 520, "segment": "Secondary", "city": "Larnaca"},
 ]
 
 CATEGORIES = [
-    {"key": "gag_funding",    "label": "GAG Funding",              "type": "revenue"},
+    {"key": "core_revenue",    "label": "Core Revenue",              "type": "revenue"},
     {"key": "other_income",   "label": "Other Income",             "type": "revenue"},
-    {"key": "teaching_staff", "label": "Teaching Staff",           "type": "expenditure"},
-    {"key": "support_staff",  "label": "Support Staff",            "type": "expenditure"},
-    {"key": "leadership",     "label": "Leadership & Management",  "type": "expenditure"},
-    {"key": "premises",       "label": "Premises & Facilities",    "type": "expenditure"},
-    {"key": "administration", "label": "Administration",           "type": "expenditure"},
-    {"key": "resources",      "label": "Resources & Supplies",     "type": "expenditure"},
+    {"key": "direct_labor", "label": "Direct Labor",           "type": "expenditure"},
+    {"key": "indirect_labor",  "label": "Indirect Labor",            "type": "expenditure"},
+    {"key": "management",     "label": "Management & Execs",  "type": "expenditure"},
+    {"key": "facilities",       "label": "Facilities & Utilities",    "type": "expenditure"},
+    {"key": "admin", "label": "Admin & Overhead",           "type": "expenditure"},
+    {"key": "software",      "label": "Software & Tools",     "type": "expenditure"},
     {"key": "other_costs",    "label": "Other Costs",              "type": "expenditure"},
 ]
 
-# Revenue and expenditure share of GAG per category
+# Revenue and expenditure share of core_rev per category
 BUDGET_RATIOS = {
-    "gag_funding":    1.00,
+    "core_revenue":    1.00,
     "other_income":   0.05,
-    "teaching_staff": 0.45,
-    "support_staff":  0.15,
-    "leadership":     0.08,
-    "premises":       0.08,
-    "administration": 0.06,
-    "resources":      0.04,
+    "direct_labor": 0.45,
+    "indirect_labor":  0.15,
+    "management":     0.08,
+    "facilities":       0.08,
+    "admin": 0.06,
+    "software":      0.04,
     "other_costs":    0.03,
 }
 
@@ -73,9 +72,9 @@ SEASONALITY_REV = [1.0, 1.0, 0.95, 0.70, 0.70, 1.05, 1.05, 1.05, 1.05, 1.0, 1.0,
 SEASONALITY_EXP = [1.0, 1.0, 0.95, 0.60, 0.60, 1.10, 1.10, 1.10, 1.00, 1.0, 1.0, 0.95]
 
 
-def annual_budget(pupils: int, key: str) -> float:
-    gag = pupils * 4500
-    return gag * BUDGET_RATIOS.get(key, 0)
+def annual_budget(headcount: int, key: str) -> float:
+    core_rev = headcount * 4500
+    return core_rev * BUDGET_RATIOS.get(key, 0)
 
 
 def gen_school(school: dict, seed: int) -> dict:
@@ -84,7 +83,7 @@ def gen_school(school: dict, seed: int) -> dict:
     for cat in CATEGORIES:
         key = cat["key"]
         typ = cat["type"]
-        annual = annual_budget(school["pupils"], key)
+        annual = annual_budget(school["headcount"], key)
         seas = SEASONALITY_REV if typ == "revenue" else SEASONALITY_EXP
         total_w = sum(seas)
 
@@ -114,25 +113,75 @@ def generate_school_data(school: dict, seed: int) -> dict:
     for cat in CATEGORIES:
         key = cat["key"]
         typ = cat["type"]
-        annual = annual_budget(school["pupils"], key)
+        annual = annual_budget(school["headcount"], key)
         seas = SEASONALITY_REV if typ == "revenue" else SEASONALITY_EXP
         total_w = sum(seas)
 
-        budget, actual, forecast = [], [], []
+        base_budget = []
+        full_actual = []
+        full_forecast = []
         for i in range(12):
             b = round(annual / total_w * seas[i])
-            budget.append(b)
-            if i < ACTUAL_MONTHS:
-                factor = rng.gauss(1.0, 0.04)
-                if rng.random() < 0.20:
-                    factor = rng.gauss(1.10, 0.03)
-                actual.append(round(b * factor))
-                forecast.append(None)
-            else:
-                actual.append(None)
-                forecast.append(round(b * rng.gauss(1.02, 0.015)))
-        result[key] = {"budget": budget, "actual": actual, "forecast": forecast}
+            base_budget.append(b)
+            factor = rng.gauss(1.0, 0.04)
+            if rng.random() < 0.20: factor = rng.gauss(1.10, 0.03)
+            full_actual.append(round(b * factor))
+            full_forecast.append(round(b * rng.gauss(1.02, 0.015)))
+        
+        # 5 year data
+        five_year = []
+        base_yr = sum(base_budget)
+        for y in range(5):
+            five_year.append(round(base_yr * (1.05 ** y))) # 5% growth
+
+        result[key] = {
+            "base_budget": base_budget,
+            "full_actual": full_actual,
+            "full_forecast": full_forecast,
+            "five_year": five_year
+        }
     return result
+
+def get_versioned_data(d, version):
+    b = d["base_budget"][:]
+    a = [None]*12
+    f = [None]*12
+    m = MONTHS[:]
+    am = ACTUAL_MONTHS
+    
+    if version == "ongoing_rolling":
+        a = d["full_actual"][:9] + [None]*3
+        f = [None]*9 + d["full_forecast"][9:]
+        am = 9
+    elif version == "initial_budget":
+        a = [None]*12
+        f = [None]*12
+        am = 0
+    elif version == "irb":
+        a = d["full_actual"][:9] + [None]*3
+        f = [None]*9 + d["base_budget"][9:]
+        am = 9
+    elif version == "final":
+        a = d["full_actual"][:]
+        f = [None]*12
+        am = 12
+    elif version == "forecast_5_7":
+        a = d["full_actual"][:5] + [None]*7
+        f = [None]*5 + d["full_forecast"][5:]
+        am = 5
+    elif version == "forecast_8_4":
+        a = d["full_actual"][:8] + [None]*4
+        f = [None]*8 + d["full_forecast"][8:]
+        am = 8
+    elif version == "5_year":
+        b = d["five_year"][:]
+        a = [None]*5
+        f = [None]*5
+        m = ["Year 1", "Year 2", "Year 3", "Year 4", "Year 5"]
+        am = 0
+
+    return {"budget": b, "actual": a, "forecast": f, "months": m, "actual_months": am}
+
 
 
 SCHOOL_DATA = {s["id"]: generate_school_data(s, 42 + i * 7) for i, s in enumerate(SCHOOLS)}
@@ -151,40 +200,54 @@ def variance(budget: list, actual: list):
     return var, pct
 
 
-def build_fpna(school: dict, sdata: dict) -> dict:
+def build_fpna(school: dict, sdata: dict, version="ongoing_rolling") -> dict:
     cats = []
+    m = MONTHS
+    am = ACTUAL_MONTHS
     for cat in CATEGORIES:
         key = cat["key"]
-        d = sdata[key]
-        v, p = variance(d["budget"], d["actual"])
+        vd = get_versioned_data(sdata[key], version)
+        m = vd["months"]
+        am = vd["actual_months"]
+        v, p = variance(vd["budget"], vd["actual"])
         cats.append({
             "key": key,
             "label": cat["label"],
             "type": cat["type"],
-            "budget": d["budget"],
-            "actual": d["actual"],
-            "forecast": d["forecast"],
+            "budget": vd["budget"],
+            "actual": vd["actual"],
+            "forecast": vd["forecast"],
             "variance": v,
             "pct_variance": p,
         })
-    return {"school": school, "months": MONTHS, "actual_months": ACTUAL_MONTHS, "categories": cats}
+    return {"school": school, "months": m, "actual_months": am, "categories": cats, "version": version}
 
 
-def group_fpna() -> dict:
+def group_fpna(city: str = None, version="ongoing_rolling") -> dict:
+    filtered_schools = [s for s in SCHOOLS if not city or city == "all" or s["city"].lower() == city.lower()]
     merged = {}
+    m = MONTHS
+    am = ACTUAL_MONTHS
     for cat in CATEGORIES:
         key = cat["key"]
-        budget = [0] * 12
-        actual = [None] * 12
-        forecast = [None] * 12
-        for school in SCHOOLS:
-            d = SCHOOL_DATA[school["id"]][key]
-            for i in range(12):
-                budget[i] += d["budget"][i]
-                if d["actual"][i] is not None:
-                    actual[i] = (actual[i] or 0) + d["actual"][i]
-                if d["forecast"][i] is not None:
-                    forecast[i] = (forecast[i] or 0) + d["forecast"][i]
+        
+        test_vd = get_versioned_data(SCHOOL_DATA[SCHOOLS[0]["id"]][key], version)
+        m = test_vd["months"]
+        am = test_vd["actual_months"]
+        n_len = len(m)
+        
+        budget = [0] * n_len
+        actual = [None] * n_len
+        forecast = [None] * n_len
+        
+        for school in filtered_schools:
+            vd = get_versioned_data(SCHOOL_DATA[school["id"]][key], version)
+            for i in range(n_len):
+                budget[i] += vd["budget"][i]
+                if vd["actual"][i] is not None:
+                    actual[i] = (actual[i] or 0) + vd["actual"][i]
+                if vd["forecast"][i] is not None:
+                    forecast[i] = (forecast[i] or 0) + vd["forecast"][i]
         v, p = variance(budget, actual)
         merged[key] = {
             "key": key, "label": cat["label"], "type": cat["type"],
@@ -195,31 +258,48 @@ def group_fpna() -> dict:
         }
     group_school = {
         "id": "group",
-        "name": "Academy Trust Group (Consolidated)",
-        "pupils": sum(s["pupils"] for s in SCHOOLS),
-        "phase": "Multi-phase",
+        "name": "Alpha Education Group (Consolidated)",
+        "headcount": sum(s["headcount"] for s in filtered_schools),
+        "segment": "Multi-segment",
     }
-    return {"school": group_school, "months": MONTHS, "actual_months": ACTUAL_MONTHS,
+    return {"school": group_school, "months": m, "actual_months": am,
             "categories": list(merged.values())}
 
 
 # ── API routes ────────────────────────────────────────────────────────────────
 @app.get("/api/schools")
-def get_schools():
+def get_schools(city: str = None, version: str = "ongoing_rolling"):
     out = []
+    
+    # helper for actual months
+    test_vd = get_versioned_data(SCHOOL_DATA[SCHOOLS[0]["id"]][CATEGORIES[0]["key"]], version)
+    am = test_vd["actual_months"]
+    n_len = len(test_vd["months"])
+    
     for school in SCHOOLS:
+        if city and city != "all" and school.get("city", "").lower() != city.lower():
+            continue
         sid = school["id"]
         sd = SCHOOL_DATA[sid]
         rev_b = rev_a = exp_b = exp_a = 0
+        rev_b_months = [0]*n_len
+        rev_a_months = [0]*n_len
+        exp_b_months = [0]*n_len
+        exp_a_months = [0]*n_len
         for cat in CATEGORIES:
             key = cat["key"]
-            for i in range(ACTUAL_MONTHS):
-                b = sd[key]["budget"][i]
-                a = sd[key]["actual"][i] or b
+            vd = get_versioned_data(sd[key], version)
+            for i in range(n_len):
+                b = vd["budget"][i]
+                a = vd["actual"][i] if vd["actual"][i] is not None else 0
                 if cat["type"] == "revenue":
-                    rev_b += b; rev_a += a
+                    rev_b_months[i] += b
+                    rev_a_months[i] += a
+                    if am == 0 or i < am: rev_b += b; rev_a += a
                 else:
-                    exp_b += b; exp_a += a
+                    exp_b_months[i] += b
+                    exp_a_months[i] += a
+                    if am == 0 or i < am: exp_b += b; exp_a += a
         out.append({**school,
                     "ytd_revenue_budget": round(rev_b),
                     "ytd_revenue_actual": round(rev_a),
@@ -227,27 +307,32 @@ def get_schools():
                     "ytd_expenditure_actual": round(exp_a),
                     "ytd_surplus_budget": round(rev_b - exp_b),
                     "ytd_surplus_actual": round(rev_a - exp_a),
+                    "rev_b_months": rev_b_months,
+                    "rev_a_months": rev_a_months,
+                    "exp_b_months": exp_b_months,
+                    "exp_a_months": exp_a_months,
                     "erp_status": "Connected", "erp_system": "SIMS"})
-    return {"schools": out, "months": MONTHS, "actual_months": ACTUAL_MONTHS}
+    return {"schools": out, "months": test_vd["months"], "actual_months": am}
 
 
 @app.get("/api/fpna/{school_id}")
-def get_fpna(school_id: str):
+def get_fpna(school_id: str, city: str = None, version: str = "ongoing_rolling"):
     if school_id == "group":
-        return group_fpna()
+        return group_fpna(city, version)
     school = next((s for s in SCHOOLS if s["id"] == school_id), None)
     if not school:
         raise HTTPException(404, "School not found")
-    return build_fpna(school, SCHOOL_DATA[school_id])
+    return build_fpna(school, SCHOOL_DATA[school_id], version)
 
 
 @app.get("/api/variance/{school_id}")
-def get_variance(school_id: str):
-    data = group_fpna() if school_id == "group" else get_fpna(school_id)
+def get_variance(school_id: str, city: str = None, version: str = "ongoing_rolling"):
+    data = group_fpna(city, version) if school_id == "group" else get_fpna(school_id, city, version)
     significant = []
     for cat in data["categories"]:
-        b_ytd = sum(cat["budget"][:ACTUAL_MONTHS])
-        a_ytd = sum(x for x in cat["actual"][:ACTUAL_MONTHS] if x is not None)
+        am = data["actual_months"]
+        b_ytd = sum(cat["budget"][:am]) if am > 0 else sum(cat["budget"])
+        a_ytd = sum(x for x in cat["actual"][:am] if x is not None) if am > 0 else 0
         var = a_ytd - b_ytd
         pct = round(var / b_ytd * 100, 1) if b_ytd else 0
         if abs(pct) > 2:
@@ -259,8 +344,8 @@ def get_variance(school_id: str):
     return {
         "school": data["school"],
         "significant_variances": sorted(significant, key=lambda x: abs(x["pct_variance"]), reverse=True),
-        "actual_months": ACTUAL_MONTHS,
-        "months": MONTHS[:ACTUAL_MONTHS],
+        "actual_months": data["actual_months"],
+        "months": data["months"][:data["actual_months"]] if data["actual_months"] > 0 else data["months"],
     }
 
 
@@ -268,9 +353,9 @@ def get_variance(school_id: str):
 def get_consolidation():
     rows = []
     for s in SCHOOLS:
-        rev = sum(annual_budget(s["pupils"], c["key"]) for c in CATEGORIES if c["type"] == "revenue")
-        exp = sum(annual_budget(s["pupils"], c["key"]) for c in CATEGORIES if c["type"] == "expenditure")
-        rows.append({"school": s["name"], "pupils": s["pupils"],
+        rev = sum(annual_budget(s["headcount"], c["key"]) for c in CATEGORIES if c["type"] == "revenue")
+        exp = sum(annual_budget(s["headcount"], c["key"]) for c in CATEGORIES if c["type"] == "expenditure")
+        rows.append({"school": s["name"], "headcount": s["headcount"],
                      "annual_revenue": round(rev), "annual_expenditure": round(exp),
                      "annual_surplus": round(rev - exp)})
     return {"schools": rows,
@@ -292,7 +377,7 @@ class CommentaryRequest(BaseModel):
 
 @app.post("/api/ai/explain-variance")
 def explain_variance(req: VarianceRequest):
-    if not gemini_model:
+    if not gemini_client:
         return {"explanation": "⚠️ AI service not configured. Add your GEMINI_API_KEY to the .env file.",
                 "key_drivers": [], "risk_rating": "N/A"}
     lines = "\n".join(
@@ -316,7 +401,7 @@ Write a concise financial commentary (3–4 paragraphs) for a Finance Director c
 
 Tone: professional, direct, suitable for a Finance Director. Plain paragraphs only."""
     try:
-        resp = gemini_model.generate_content(prompt)
+        resp = gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
         max_pct = max((abs(v["pct_variance"]) for v in req.variances), default=0)
         risk = "High" if max_pct > 10 else "Medium" if max_pct > 5 else "Low"
         return {"explanation": resp.text,
@@ -328,7 +413,7 @@ Tone: professional, direct, suitable for a Finance Director. Plain paragraphs on
 
 @app.post("/api/ai/board-commentary")
 def board_commentary(req: CommentaryRequest):
-    if not gemini_model:
+    if not gemini_client:
         return {"commentary": "⚠️ AI service not configured. Add your GEMINI_API_KEY to the .env file."}
     s = req.summary
     prompt = f"""You are a Finance Director at an Academy Trust preparing a formal board report.
@@ -356,7 +441,7 @@ Write a formal Board Management Commentary for the Trustees covering:
 
 Formal language appropriate for a Board of Trustees."""
     try:
-        resp = gemini_model.generate_content(prompt)
+        resp = gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
         return {"commentary": resp.text}
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -366,9 +451,9 @@ Formal language appropriate for a Board of Trustees."""
 class SchoolInput(BaseModel):
     id: str
     name: str
-    pupils: int
-    phase: str
-    funding_rate: float = 4500
+    headcount: int
+    segment: str
+    revenue_per_head: float = 4500
 
 
 class RecalcRequest(BaseModel):
@@ -376,19 +461,19 @@ class RecalcRequest(BaseModel):
     ratios: dict
 
 
-def generate_custom_data(school: dict, seed: int, ratios: dict, funding_rate: float) -> dict:
+def generate_custom_data(school: dict, seed: int, ratios: dict, revenue_per_head: float) -> dict:
     rng = random.Random(seed)
     result = {}
-    gag = school["pupils"] * funding_rate
+    core_rev = school["headcount"] * revenue_per_head
     for cat in CATEGORIES:
         key = cat["key"]
         typ = cat["type"]
-        if key == "gag_funding":
-            annual = gag
+        if key == "core_revenue":
+            annual = core_rev
         elif key == "other_income":
-            annual = gag * 0.05
+            annual = core_rev * 0.05
         else:
-            annual = gag * ratios.get(key, BUDGET_RATIOS.get(key, 0))
+            annual = core_rev * ratios.get(key, BUDGET_RATIOS.get(key, 0))
         seas = SEASONALITY_REV if typ == "revenue" else SEASONALITY_EXP
         total_w = sum(seas)
         budget, actual, forecast = [], [], []
@@ -413,7 +498,7 @@ def recalculate(req: RecalcRequest):
     custom_schools = req.schools
     custom_ratios = req.ratios or BUDGET_RATIOS
     custom_data = {
-        s["id"]: generate_custom_data(s, 42 + i * 7, custom_ratios, s.get("funding_rate", 4500))
+        s["id"]: generate_custom_data(s, 42 + i * 7, custom_ratios, s.get("revenue_per_head", 4500))
         for i, s in enumerate(custom_schools)
     }
     merged = {}
@@ -439,10 +524,10 @@ def recalculate(req: RecalcRequest):
             "variance": v, "pct_variance": p,
         }
     group_school = {
-        "id": "group", "name": "Academy Trust Group (Updated)",
-        "pupils": sum(s["pupils"] for s in custom_schools), "phase": "Multi-phase",
+        "id": "group", "name": "Alpha Education Group (Updated)",
+        "headcount": sum(s["headcount"] for s in custom_schools), "segment": "Multi-segment",
     }
-    return {"school": group_school, "months": MONTHS, "actual_months": ACTUAL_MONTHS,
+    return {"school": group_school, "months": m, "actual_months": am,
             "categories": list(merged.values())}
 
 

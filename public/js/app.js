@@ -24,6 +24,10 @@ const varCls = (n, type) => {
 // ── State ─────────────────────────────────────────
 const S = {
   school:    'group',
+  city:      'all',
+  date:      'ytd',
+  version:   'ongoing_rolling',
+  filterMonth: null,
   tab:       'dashboard',
   charts:    {},
   dashCache: {},
@@ -32,24 +36,23 @@ const S = {
 };
 
 // ── Default assumptions ───────────────────────────
-const DEF_SCHOOLS = [
-  { id:'greenfield', name:'Greenfield Academy',  pupils:650, phase:'Secondary',   funding_rate:4500 },
-  { id:'oakwood',    name:'Oakwood School',       pupils:480, phase:'Primary',     funding_rate:4500 },
-  { id:'riverside',  name:'Riverside College',    pupils:820, phase:'Secondary',   funding_rate:4500 },
-  { id:'hillcrest',  name:'Hillcrest Primary',    pupils:310, phase:'Primary',     funding_rate:4500 },
-  { id:'lakeside',   name:'Lakeside Free School', pupils:520, phase:'All-through', funding_rate:4500 },
+const DEF_REGIONS = [
+  { id:'aes_nicosia', name:'Alpha English School Nicosia', headcount:650, segment:'Secondary', revenue_per_head:4500, city: 'Nicosia' },
+  { id:'aps_nicosia', name:'Alpha Primary School Nicosia', headcount:480, segment:'Primary', revenue_per_head:4500, city: 'Nicosia' },
+  { id:'aes_limassol', name:'Alpha English School Limassol', headcount:820, segment:'Secondary', revenue_per_head:4500, city: 'Limassol' },
+  { id:'aes_larnaca', name:'Alpha English School Larnaca', headcount:520, segment:'Secondary', revenue_per_head:4500, city: 'Larnaca' },
 ];
 const DEF_RATIOS = {
-  teaching_staff:0.45, support_staff:0.15, leadership:0.08,
-  premises:0.08, administration:0.06, resources:0.04, other_costs:0.03,
+  direct_labor:0.45, indirect_labor:0.15, management:0.08,
+  facilities:0.08, admin:0.06, software:0.04, other_costs:0.03,
 };
 const RATIO_LABELS = {
-  teaching_staff:'Teaching Staff', support_staff:'Support Staff',
-  leadership:'Leadership & Management', premises:'Premises & Facilities',
-  administration:'Administration', resources:'Resources & Supplies', other_costs:'Other Costs',
+  direct_labor:'Direct Labor', indirect_labor:'Indirect Labor',
+  management:'Management & Execs', facilities:'Facilities & Utilities',
+  admin:'Admin & Overhead', software:'Software & Tools', other_costs:'Other Costs',
 };
 
-S.inputSchools = DEF_SCHOOLS.map(s => ({...s}));
+S.inputSchools = DEF_REGIONS.map(s => ({...s}));
 S.inputRatios  = {...DEF_RATIOS};
 
 // ── AI chip helpers ───────────────────────────────
@@ -109,6 +112,45 @@ function switchTab(tab) {
   if (tab === 'input')                                 renderInput();
 }
 
+
+
+function onVersionChange(v) {
+  S.version = v;
+  S.dashCache = {}; S.fpnaCache = {}; S.varCache = {}; // invalidate caches
+  if (S.version === 'initial_budget' || S.version === '5_year') { S.date = 'full'; document.getElementById('date-select').value='full'; document.getElementById('date-select').disabled=true; } 
+  else { document.getElementById('date-select').disabled=false; }
+  
+  if (S.tab === 'dashboard') loadDashboard(S.school);
+  if (S.tab === 'fpna')      loadFpna(S.school);
+  if (S.tab === 'ai')        loadAi(S.school);
+}
+
+function onCityChange(v) {
+  S.city = v;
+  S.dashCache = {}; S.fpnaCache = {}; S.varCache = {}; // invalidate caches
+  if (S.tab === 'dashboard') loadDashboard(S.school);
+  if (S.tab === 'fpna')      loadFpna(S.school);
+  if (S.tab === 'ai')        loadAi(S.school);
+}
+function onDateChange(v) {
+  S.date = v;
+  // Just trigger re-render from cache
+  if (S.tab === 'dashboard' && S.dashCache[S.school]) renderDashboard(S.dashCache[S.school].fpna, S.dashCache[S.school].schools);
+  if (S.tab === 'fpna' && S.fpnaCache[S.school]) renderFpna(S.fpnaCache[S.school]);
+}
+
+
+function onChartClick(e, chart, type) {
+  const elems = chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true);
+  if (!elems.length) {
+    if (S.filterMonth !== null) { S.filterMonth = null; onDateChange(S.date); }
+    return;
+  }
+  const idx = elems[0].index;
+  if (S.filterMonth === idx) S.filterMonth = null;
+  else S.filterMonth = idx;
+  onDateChange(S.date);
+}
 function onSchoolChange(v) {
   S.school = v;
   if (S.tab === 'dashboard') loadDashboard(v);
@@ -123,8 +165,8 @@ async function loadDashboard(sid) {
   show('dash-loading'); hide('dash-content');
   try {
     const [fpna, schools] = await Promise.all([
-      api(`/api/fpna/${sid}`),
-      api('/api/schools'),
+      api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`),
+      api(`/api/schools?city=${S.city}&version=${S.version}`),
     ]);
     S.dashCache[sid] = { fpna, schools };
     renderDashboard(fpna, schools.schools);
@@ -132,18 +174,19 @@ async function loadDashboard(sid) {
 }
 
 function renderDashboard(fpna, schools) {
-  const { months, actual_months:AM, categories } = fpna;
+  let { months, actual_months:AM, categories } = fpna;
+  let max_months = (S.date === 'ytd' && AM > 0) ? AM : months.length;
 
   // Totals
   let revB=0, revA=0, expB=0, expA=0;
   categories.forEach(c => {
-    const bS = c.budget.slice(0,AM).reduce((s,x)=>s+x,0);
-    const aS = c.actual.slice(0,AM).reduce((s,x)=>s+(x||0),0);
+    const bS = S.filterMonth !== null ? (c.budget[S.filterMonth]||0) : c.budget.slice(0,max_months).reduce((s,x)=>s+x,0);
+    const aS = S.filterMonth !== null ? (c.actual[S.filterMonth]||0) : c.actual.slice(0,max_months).reduce((s,x)=>s+(x||0),0);
     if (c.type==='revenue') { revB+=bS; revA+=aS; }
     else                    { expB+=bS; expA+=aS; }
   });
   const surpA=revA-expA, surpB=revB-expB;
-  const totalPupils = schools.reduce((s,x)=>s+x.pupils,0);
+  const totalHeadcount = schools.reduce((s,x)=>s+x.headcount,0);
 
   // KPIs
   const insRev  = insight(revA, revB, 'revenue');
@@ -152,26 +195,26 @@ function renderDashboard(fpna, schools) {
 
   el('dash-kpis').innerHTML = `
     <div class="kpi-card ${revA>=revB?'green':'amber'}">
-      <div class="kpi-label">YTD Revenue</div>
+      <div class="kpi-label">${S.filterMonth !== null ? months[S.filterMonth] : 'YTD'} Revenue</div>
       <div class="kpi-value">${shortEur(revA)}</div>
       <div class="kpi-sub">Budget: ${shortEur(revB)}</div>
       ${delta(revA,revB,'revenue')}
     </div>
     <div class="kpi-card ${expA<=expB?'green':'amber'}">
-      <div class="kpi-label">YTD Expenditure</div>
+      <div class="kpi-label">${S.filterMonth !== null ? months[S.filterMonth] : 'YTD'} Expenditure</div>
       <div class="kpi-value">${shortEur(expA)}</div>
       <div class="kpi-sub">Budget: ${shortEur(expB)}</div>
       ${delta(expA,expB,'expenditure')}
     </div>
     <div class="kpi-card ${surpA>=surpB?'green':'red'}">
-      <div class="kpi-label">YTD Surplus</div>
+      <div class="kpi-label">${S.filterMonth !== null ? months[S.filterMonth] : 'YTD'} Surplus</div>
       <div class="kpi-value">${shortEur(surpA)}</div>
       <div class="kpi-sub">Budget: ${shortEur(surpB)}</div>
       ${delta(surpA,surpB,'revenue')}
     </div>
     <div class="kpi-card">
-      <div class="kpi-label">Total Pupils</div>
-      <div class="kpi-value">${totalPupils.toLocaleString()}</div>
+      <div class="kpi-label">Total Headcount</div>
+      <div class="kpi-value">${totalHeadcount.toLocaleString()}</div>
       <div class="kpi-sub">Across ${schools.length} schools</div>
     </div>`;
 
@@ -182,7 +225,7 @@ function renderDashboard(fpna, schools) {
       { ins: insRev,  label: 'Revenue' },
       { ins: insExp,  label: 'Expenditure' },
       { ins: insSurp, label: 'Net surplus' },
-      { ins: {text:'Pupil numbers stable — GAG funding secured', cls:'pos'}, label:'Pupils' },
+      { ins: {text:'Headcount numbers stable — Core revenue secured', cls:'pos'}, label:'Headcount' },
     ];
     stripEl.innerHTML = `<span class="ai-strip-star">✦</span>
       <div class="ai-strip-items">${items.map((x,i)=>`
@@ -203,29 +246,29 @@ function renderDashboard(fpna, schools) {
   const baseLegend = { labels:{font:CF, padding:14, usePointStyle:true, pointStyleWidth:8} };
 
   // 1. Revenue line
-  const gagC  = categories.find(c=>c.key==='gag_funding');
+  const core_revC  = categories.find(c=>c.key==='core_revenue');
   const othC  = categories.find(c=>c.key==='other_income');
-  const rBudg = months.map((_,i)=>(gagC?.budget[i]||0)+(othC?.budget[i]||0));
-  const rAct  = months.map((_,i)=>i<AM ? (gagC?.actual[i]||0)+(othC?.actual[i]||0) : null);
-  const rFcst = months.map((_,i)=>i>=AM? (gagC?.forecast[i]||0)+(othC?.forecast[i]||0): null);
+  const rBudg = months.map((_,i)=>(core_revC?.budget[i]||0)+(othC?.budget[i]||0));
+  const rAct  = months.map((_,i)=>i<max_months ? (core_revC?.actual[i]||0)+(othC?.actual[i]||0) : null);
+  const rFcst = months.map((_,i)=>AM>0 && i>=AM? (core_revC?.forecast[i]||0)+(othC?.forecast[i]||0): null);
 
   S.charts.rev = new Chart(el('chart-revenue'), {
     type:'line',
     data:{ labels:months, datasets:[
-      {label:'Budget',   data:rBudg, borderColor:'#3B4CB8', borderDash:[4,3], borderWidth:1.5, pointRadius:2, fill:false, tension:.35},
+      {label:'Budget',   data:rBudg, borderColor:'#334155', borderDash:[4,3], borderWidth:1.5, pointRadius:2, fill:false, tension:.35},
       {label:'Actual',   data:rAct,  borderColor:'#009A3D', backgroundColor:'rgba(0,154,61,.1)', borderWidth:2, pointRadius:3, fill:true,  tension:.35},
       {label:'Forecast', data:rFcst, borderColor:'#FF6900', borderDash:[4,3], borderWidth:1.5, pointRadius:2, fill:false, tension:.35},
     ]},
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:baseLegend, tooltip:{cornerRadius:6, callbacks:{label:ctx=>` ${ctx.dataset.label}: ${eur(ctx.parsed.y)}`}}}, scales:baseScales },
+    options:{ onClick: (e, elems) => { if(elems.length){ S.filterMonth = elems[0].index; onDateChange(S.date); } else { S.filterMonth=null; onDateChange(S.date); } }, responsive:true, maintainAspectRatio:false, plugins:{legend:baseLegend, tooltip:{cornerRadius:6, callbacks:{label:ctx=>` ${ctx.dataset.label}: ${eur(ctx.parsed.y)}`}}}, scales:baseScales },
   });
 
   // 2. Expenditure doughnut
   const expCats = categories.filter(c=>c.type==='expenditure');
-  const dColors = ['#4B2882','#5D3599','#009A3D','#FF6900','#E91E8C','#0097A7','#8D6E63'];
+  const dColors = ['#0F172A','#1E293B','#009A3D','#FF6900','#E91E8C','#0097A7','#8D6E63'];
   S.charts.exp = new Chart(el('chart-expense'), {
     type:'doughnut',
     data:{ labels:expCats.map(c=>c.label), datasets:[{
-      data: expCats.map(c=>c.actual.slice(0,AM).reduce((s,x)=>s+(x||0),0)),
+      data: expCats.map(c=>S.filterMonth !== null ? (c.actual[S.filterMonth]||0) : c.actual.slice(0,max_months).reduce((s,x)=>s+(x||0),0)),
       backgroundColor:dColors, borderWidth:2, borderColor:'#fff',
     }]},
     options:{ responsive:true, maintainAspectRatio:false, plugins:{
@@ -242,7 +285,7 @@ function renderDashboard(fpna, schools) {
     return r-e;
   });
   const surpFcst = months.map((_,i)=>{
-    if(i<AM) return null;
+    if(i<max_months) return null;
     const r=categories.filter(c=>c.type==='revenue').reduce((s,c)=>s+(c.forecast[i]||c.budget[i]||0),0);
     const e=categories.filter(c=>c.type==='expenditure').reduce((s,c)=>s+(c.forecast[i]||c.budget[i]||0),0);
     return r-e;
@@ -256,17 +299,17 @@ function renderDashboard(fpna, schools) {
   S.charts.surp = new Chart(el('chart-surplus'), {
     type:'line',
     data:{ labels:months, datasets:[
-      {label:'Budget',   data:surpBudg, borderColor:'#3B4CB8', borderDash:[4,3], borderWidth:1.5, pointRadius:2, fill:false, tension:.35},
-      {label:'Actual',   data:surpAct,  borderColor:'#4B2882', backgroundColor:'rgba(75,40,130,.1)', borderWidth:2, pointRadius:3, fill:true, tension:.35},
+      {label:'Budget',   data:surpBudg, borderColor:'#334155', borderDash:[4,3], borderWidth:1.5, pointRadius:2, fill:false, tension:.35},
+      {label:'Actual',   data:surpAct,  borderColor:'#0F172A', backgroundColor:'rgba(15,23,42,.1)', borderWidth:2, pointRadius:3, fill:true, tension:.35},
       {label:'Forecast', data:surpFcst, borderColor:'#FF6900', borderDash:[4,3], borderWidth:1.5, pointRadius:2, fill:false, tension:.35},
     ]},
-    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:baseLegend, tooltip:{cornerRadius:6, callbacks:{label:ctx=>` ${ctx.dataset.label}: ${eur(ctx.parsed.y)}`}}}, scales:baseScales },
+    options:{ onClick: (e, elems) => { if(elems.length){ S.filterMonth = elems[0].index; onDateChange(S.date); } else { S.filterMonth=null; onDateChange(S.date); } }, responsive:true, maintainAspectRatio:false, plugins:{legend:baseLegend, tooltip:{cornerRadius:6, callbacks:{label:ctx=>` ${ctx.dataset.label}: ${eur(ctx.parsed.y)}`}}}, scales:baseScales },
   });
 
   // 4. Variance bar (horizontal)
   const varItems = categories.map(c=>{
-    const b=c.budget.slice(0,AM).reduce((s,x)=>s+x,0);
-    const a=c.actual.slice(0,AM).reduce((s,x)=>s+(x||0),0);
+    const b = S.filterMonth !== null ? (c.budget[S.filterMonth]||0) : c.budget.slice(0,max_months).reduce((s,x)=>s+x,0);
+    const a = S.filterMonth !== null ? (c.actual[S.filterMonth]||0) : c.actual.slice(0,max_months).reduce((s,x)=>s+(x||0),0);
     return { label:c.label, type:c.type, v:a-b };
   }).filter(x=>Math.abs(x.v)>200).sort((a,b)=>Math.abs(b.v)-Math.abs(a.v)).slice(0,8);
 
@@ -290,17 +333,35 @@ function renderDashboard(fpna, schools) {
     },
   });
 
+  
+  // Update point styles to highlight selected month
+  if (S.filterMonth !== null) {
+    [S.charts.rev, S.charts.surp].forEach(ch => {
+      ch.data.datasets.forEach(ds => {
+        ds.radius = ctx => ctx.dataIndex === S.filterMonth ? 6 : 2;
+        ds.borderWidth = ctx => ctx.dataIndex === S.filterMonth ? 4 : 2;
+      });
+      ch.update();
+    });
+  }
+
   // School summary table
   el('dash-schools-tbody').innerHTML = schools.map(s => {
-    const surpV = s.ytd_surplus_actual - s.ytd_surplus_budget;
-    const surpP = s.ytd_surplus_budget ? surpV/Math.abs(s.ytd_surplus_budget)*100 : 0;
-    return `<tr>
+    const rb = S.filterMonth !== null && s.rev_b_months ? s.rev_b_months[S.filterMonth] : s.ytd_revenue_budget;
+    const ra = S.filterMonth !== null && s.rev_a_months ? s.rev_a_months[S.filterMonth] : s.ytd_revenue_actual;
+    const eb = S.filterMonth !== null && s.exp_b_months ? s.exp_b_months[S.filterMonth] : s.ytd_expenditure_budget;
+    const ea = S.filterMonth !== null && s.exp_a_months ? s.exp_a_months[S.filterMonth] : s.ytd_expenditure_actual;
+    const sA = ra - ea;
+    const sB = rb - eb;
+    const surpV = sA - sB;
+    const surpP = sB ? surpV/Math.abs(sB)*100 : 0;
+    return `<tr style="cursor:pointer" onclick="document.getElementById('school-select').value='${s.id}'; onSchoolChange('${s.id}')">
       <td><strong>${s.name}</strong></td>
-      <td style="color:var(--muted)">${s.phase}</td>
-      <td class="num">${s.pupils.toLocaleString()}</td>
-      <td class="num">${eur(s.ytd_revenue_actual)}</td>
-      <td class="num">${eur(s.ytd_expenditure_actual)}</td>
-      <td class="num ${s.ytd_surplus_actual>=0?'fav':'adv'}">${eur(s.ytd_surplus_actual)}</td>
+      <td style="color:var(--muted)">${s.segment}</td>
+      <td class="num">${s.headcount.toLocaleString()}</td>
+      <td class="num">${eur(ra)}</td>
+      <td class="num">${eur(ea)}</td>
+      <td class="num ${sA>=0?'fav':'adv'}">${eur(sA)}</td>
       <td class="num ${varCls(surpP,'revenue')}">${fmt_pct(surpP)}</td>
     </tr>`;
   }).join('');
@@ -318,16 +379,16 @@ function renderInput() {
   el('input-schools-tbody').innerHTML = S.inputSchools.map((s, i) => `
     <tr>
       <td><strong>${s.name}</strong></td>
-      <td style="color:var(--muted)">${s.phase}</td>
+      <td style="color:var(--muted)">${s.segment}</td>
       <td class="num">
-        <input type="number" class="input-cell" value="${s.pupils}" min="10" max="3000"
-          onchange="S.inputSchools[${i}].pupils=+this.value; updateGAGRow(${i})">
+        <input type="number" class="input-cell" value="${s.headcount}" min="10" max="3000"
+          onchange="S.inputSchools[${i}].headcount=+this.value; updateRevRow(${i})">
       </td>
       <td class="num">
-        <input type="number" class="input-cell" value="${s.funding_rate}" min="1000" max="12000" step="100"
-          onchange="S.inputSchools[${i}].funding_rate=+this.value; updateGAGRow(${i})">
+        <input type="number" class="input-cell" value="${s.revenue_per_head}" min="1000" max="12000" step="100"
+          onchange="S.inputSchools[${i}].revenue_per_head=+this.value; updateRevRow(${i})">
       </td>
-      <td class="num" id="gag-row-${i}">${eur(s.pupils * s.funding_rate)}</td>
+      <td class="num" id="rev-row-${i}">${eur(s.headcount * s.revenue_per_head)}</td>
     </tr>`).join('');
 
   // Ratios
@@ -343,10 +404,10 @@ function renderInput() {
     </div>`).join('');
 }
 
-function updateGAGRow(i) {
+function updateRevRow(i) {
   const s = S.inputSchools[i];
-  const e = el(`gag-row-${i}`);
-  if (e) e.textContent = eur(s.pupils * s.funding_rate);
+  const e = el(`rev-row-${i}`);
+  if (e) e.textContent = eur(s.headcount * s.revenue_per_head);
 }
 
 async function applyAssumptions() {
@@ -375,7 +436,7 @@ async function applyAssumptions() {
 }
 
 function resetAssumptions() {
-  S.inputSchools = DEF_SCHOOLS.map(s => ({...s}));
+  S.inputSchools = DEF_REGIONS.map(s => ({...s}));
   S.inputRatios  = {...DEF_RATIOS};
   S.dashCache = {}; S.fpnaCache = {}; S.varCache = {};
   renderInput();
@@ -388,46 +449,47 @@ function resetAssumptions() {
 async function loadFpna(sid) {
   show('fpna-loading'); hide('fpna-content');
   try {
-    const d = await api(`/api/fpna/${sid}`);
+    const d = await api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`);
     S.fpnaCache[sid] = d;
     renderFpna(d);
   } catch(e) { el('fpna-loading').textContent = '⚠ ' + e.message; }
 }
 
 function renderFpna(data) {
-  const { school, months, actual_months:AM, categories } = data;
+  let { school, months, actual_months:AM, categories } = data;
+  let max_months = (S.date === 'ytd' && AM > 0) ? AM : months.length;
   let revB=0,revA=0,expB=0,expA=0;
   categories.forEach(c=>{
-    const bS=c.budget.slice(0,AM).reduce((s,x)=>s+x,0);
-    const aS=c.actual.slice(0,AM).reduce((s,x)=>s+(x||0),0);
+    const bS=c.budget.slice(0,max_months).reduce((s,x)=>s+x,0);
+    const aS=c.actual.slice(0,max_months).reduce((s,x)=>s+(x||0),0);
     if(c.type==='revenue'){revB+=bS;revA+=aS;}else{expB+=bS;expA+=aS;}
   });
   const surpA=revA-expA, surpB=revB-expB;
 
   el('fpna-kpis').innerHTML = `
     <div class="kpi-card ${revA>=revB?'green':'amber'}">
-      <div class="kpi-label">YTD Revenue</div><div class="kpi-value">${shortEur(revA)}</div>
+      <div class="kpi-label">${S.filterMonth !== null ? months[S.filterMonth] : 'YTD'} Revenue</div><div class="kpi-value">${shortEur(revA)}</div>
       <div class="kpi-sub">Budget: ${shortEur(revB)}</div>${delta(revA,revB,'revenue')}${chip(insight(revA,revB,'revenue'))}
     </div>
     <div class="kpi-card ${expA<=expB?'green':'amber'}">
-      <div class="kpi-label">YTD Expenditure</div><div class="kpi-value">${shortEur(expA)}</div>
+      <div class="kpi-label">${S.filterMonth !== null ? months[S.filterMonth] : 'YTD'} Expenditure</div><div class="kpi-value">${shortEur(expA)}</div>
       <div class="kpi-sub">Budget: ${shortEur(expB)}</div>${delta(expA,expB,'expenditure')}${chip(insight(expA,expB,'expenditure'))}
     </div>
     <div class="kpi-card ${surpA>=surpB?'green':'red'}">
-      <div class="kpi-label">YTD Surplus</div><div class="kpi-value">${shortEur(surpA)}</div>
+      <div class="kpi-label">${S.filterMonth !== null ? months[S.filterMonth] : 'YTD'} Surplus</div><div class="kpi-value">${shortEur(surpA)}</div>
       <div class="kpi-sub">Budget: ${shortEur(surpB)}</div>${delta(surpA,surpB,'revenue')}${chip(surInsight(surpA,surpB))}
     </div>
     <div class="kpi-card amber">
       <div class="kpi-label">Entity</div>
       <div class="kpi-value" style="font-size:15px">${school.name.split(' ').slice(0,2).join(' ')}</div>
-      <div class="kpi-sub">${school.pupils.toLocaleString()} pupils</div>
+      <div class="kpi-sub">${school.headcount.toLocaleString()} headcount</div>
       ${chip({text:`${AM} months actuals · ${12-AM} months forecast`})}
     </div>`;
 
   el('fpna-thead').innerHTML = `<tr>
     <th style="min-width:180px">Category</th>
-    ${months.map((m,i)=>`<th class="num" style="${i>=AM?'opacity:.7':''}">${m}${i>=AM?' ᶠ':''}</th>`).join('')}
-    <th class="num">YTD Budget</th><th class="num">YTD Actual</th>
+    ${months.map((m,i)=>`<th class="num" style="${AM>0 && i>=AM?'opacity:.7':''}">${m}${AM>0 && i>=AM?' ᶠ':''}</th>`).join('')}
+    <th class="num">Budget</th><th class="num">Actual</th>
     <th class="num">Variance €</th><th class="num">Var %</th>
   </tr>`;
 
@@ -437,8 +499,8 @@ function renderFpna(data) {
     rows += `<tr class="row-sec"><td colspan="${months.length+5}">${sec.toUpperCase()}</td></tr>`;
     let secB=0,secA=0;
     cats.forEach(c=>{
-      const ytdB=c.budget.slice(0,AM).reduce((s,x)=>s+x,0);
-      const ytdA=c.actual.slice(0,AM).reduce((s,x)=>s+(x||0),0);
+      const ytdB=c.budget.slice(0,max_months).reduce((s,x)=>s+x,0);
+      const ytdA=c.actual.slice(0,max_months).reduce((s,x)=>s+(x||0),0);
       const v=ytdA-ytdB, p=ytdB?v/ytdB*100:0;
       secB+=ytdB; secA+=ytdA;
       const cells=months.map((_,i)=>{
@@ -477,7 +539,7 @@ async function loadAi(sid) {
   el('ai-panel-body').innerHTML = `<div class="ai-placeholder"><div style="font-size:28px;margin-bottom:10px;opacity:.3">✦</div><div style="font-weight:600;margin-bottom:6px;color:var(--muted)">Ready to analyse</div><div style="font-size:12.5px;color:var(--muted)">Click "Explain with AI" to generate a detailed narrative, or "Board Commentary" for a formal report.</div></div>`;
   el('risk-badge').textContent = '';
   try {
-    const d = await api(`/api/variance/${sid}`);
+    const d = await api(`/api/variance/${sid}?city=${S.city}&version=${S.version}`);
     S.varCache[sid] = d;
     renderVariance(d);
   } catch(e) { el('ai-loading').textContent = '⚠ ' + e.message; }
