@@ -531,7 +531,23 @@ def recalculate(req: RecalcRequest):
             "categories": list(merged.values())}
 
 
-# ── Serve frontend (local dev only) ──────────────────────────────────────────
-_public = os.path.join(os.path.dirname(__file__), "..", "public")
+# ── Serve frontend ──────────────────────────────────────────
+_public = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "public"))
+
+@app.get("/")
+def read_index():
+    path = os.path.join(_public, "index.html")
+    if os.path.exists(path):
+        return FileResponse(path)
+    return {"detail": f"Index not found at {path}"}
+
 if os.path.isdir(_public):
-    app.mount("/", StaticFiles(directory=_public, html=True), name="static")
+    app.mount("/static", StaticFiles(directory=_public), name="static")
+
+# Catch-all for other static files if not caught by Vercel
+@app.get("/{path:path}")
+def catch_all(path: str):
+    file_path = os.path.join(_public, path)
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    raise HTTPException(404, "Not Found")
