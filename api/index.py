@@ -531,7 +531,57 @@ def recalculate(req: RecalcRequest):
             "categories": list(merged.values())}
 
 
-# ── Serve frontend (local dev) ──────────────────────────────────────────
-_public = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "public"))
-if os.path.isdir(_public):
+# ── Debug endpoint (remove after fixing) ──────────────────────────────────
+@app.get("/api/debug-paths")
+def debug_paths():
+    import glob
+    here = os.path.dirname(os.path.abspath(__file__))
+    parent = os.path.dirname(here)
+    candidates = [
+        os.path.join(here, "..", "public"),
+        os.path.join(here, "public"),
+        os.path.join(parent, "public"),
+        "/var/task/public",
+        "/var/task/api/public",
+    ]
+    result = {
+        "__file__": __file__,
+        "abspath(__file__)": os.path.abspath(__file__),
+        "dirname": here,
+        "parent": parent,
+        "cwd": os.getcwd(),
+    }
+    for c in candidates:
+        norm = os.path.normpath(c)
+        result[f"candidate:{norm}"] = {
+            "exists": os.path.exists(norm),
+            "isdir": os.path.isdir(norm),
+        }
+        if os.path.isdir(norm):
+            try:
+                result[f"contents:{norm}"] = os.listdir(norm)
+            except Exception as e:
+                result[f"contents:{norm}"] = str(e)
+    # Also list what's in the function root
+    for d in [here, parent]:
+        try:
+            result[f"ls:{d}"] = os.listdir(d)
+        except Exception as e:
+            result[f"ls:{d}"] = str(e)
+    return result
+
+
+# ── Serve frontend ──────────────────────────────────────────────────────
+_public = None
+_candidates = [
+    os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "public")),
+    os.path.normpath(os.path.join(os.path.dirname(__file__), "public")),
+    "/var/task/public",
+]
+for _c in _candidates:
+    if os.path.isdir(_c):
+        _public = _c
+        break
+
+if _public:
     app.mount("/", StaticFiles(directory=_public, html=True), name="static")
