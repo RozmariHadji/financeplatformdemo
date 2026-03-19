@@ -1,8 +1,5 @@
 {
   "outputDirectory": "public",
-  "functions": {
-    "api/index.py": {}
-  },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/index.py" }
   ]
