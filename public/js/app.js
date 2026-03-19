@@ -189,34 +189,19 @@ function onSchoolChange(v) {
   if (S.tab === 'ai')        loadAi(v);
 }
 
-async function onScenarioChange(scen) {
+function scenarioBody() {
+  const sc = SCENARIOS[S.scenario];
+  return JSON.stringify({
+    schools: S.inputSchools.map(s => ({ ...s, revenue_per_head: s.revenue_per_head * sc.rev_mult })),
+    ratios:  Object.fromEntries(Object.entries(S.inputRatios).map(([k, v]) => [k, v * sc.cost_mult])),
+  });
+}
+
+function onScenarioChange(scen) {
   S.scenario = scen;
   S.dashCache = {}; S.fpnaCache = {}; S.varCache = {};
-
-  // Update scenario select styling
   const sel = document.getElementById('scenario-select');
   sel.className = 'gt-select scenario-select ' + (scen !== 'base' ? SCENARIOS[scen].cls : '');
-
-  // Apply scenario multipliers via recalculate endpoint
-  if (scen !== 'base') {
-    const sc = SCENARIOS[scen];
-    const scenarioSchools = S.inputSchools.map(s => ({
-      ...s,
-      revenue_per_head: s.revenue_per_head * sc.rev_mult,
-    }));
-    const scenarioRatios = {};
-    Object.entries(S.inputRatios).forEach(([k, v]) => {
-      scenarioRatios[k] = v * sc.cost_mult;
-    });
-    try {
-      await api('/api/recalculate', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ schools: scenarioSchools, ratios: scenarioRatios }),
-      });
-      S.dashCache[S.school] = null;
-    } catch(e) { console.warn('Scenario recalculate failed:', e); }
-  }
-
   if (S.tab === 'dashboard') loadDashboard(S.school);
   if (S.tab === 'fpna')      loadFpna(S.school);
   if (S.tab === 'ai')        loadAi(S.school);
@@ -228,10 +213,11 @@ async function onScenarioChange(scen) {
 async function loadDashboard(sid) {
   show('dash-loading'); hide('dash-content');
   try {
-    const [fpna, schools] = await Promise.all([
-      api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`),
-      api(`/api/schools?city=${S.city}&version=${S.version}`),
-    ]);
+    const schoolsRes = api(`/api/schools?city=${S.city}&version=${S.version}`);
+    const fpnaRes = S.scenario !== 'base'
+      ? api('/api/recalculate', { method:'POST', headers:{'Content-Type':'application/json'}, body: scenarioBody() })
+      : api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`);
+    const [schools, fpna] = await Promise.all([schoolsRes, fpnaRes]);
     S.dashCache[sid] = { fpna, schools: schools.schools };
     renderDashboard(fpna, schools.schools);
   } catch(e) { el('dash-loading').textContent = '⚠ ' + e.message; }
@@ -520,7 +506,9 @@ function renderDashboard(fpna, schools) {
 async function loadFpna(sid) {
   show('fpna-loading'); hide('fpna-content');
   try {
-    const d = await api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`);
+    const d = S.scenario !== 'base'
+      ? await api('/api/recalculate', { method:'POST', headers:{'Content-Type':'application/json'}, body: scenarioBody() })
+      : await api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`);
     S.fpnaCache[sid] = d;
     renderFpna(d);
   } catch(e) { el('fpna-loading').textContent = '⚠ ' + e.message; }
