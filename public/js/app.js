@@ -189,12 +189,20 @@ function onSchoolChange(v) {
   if (S.tab === 'ai')        loadAi(v);
 }
 
-function scenarioBody() {
-  const sc = SCENARIOS[S.scenario];
-  return JSON.stringify({
-    schools: S.inputSchools.map(s => ({ ...s, revenue_per_head: s.revenue_per_head * sc.rev_mult })),
-    ratios:  Object.fromEntries(Object.entries(S.inputRatios).map(([k, v]) => [k, v * sc.cost_mult])),
+// Apply scenario multipliers to forecast months only — actuals & budget stay fixed
+function applyScenarioTo(fpnaBase, scen) {
+  if (scen === 'base') return fpnaBase;
+  const sc = SCENARIOS[scen];
+  const AM = fpnaBase.actual_months;
+  const categories = fpnaBase.categories.map(c => {
+    const forecast = c.forecast.map((v, i) => {
+      if (i < AM || v === null) return v;
+      const mult = c.type === 'revenue' ? sc.rev_mult : sc.cost_mult;
+      return Math.round(v * mult);
+    });
+    return { ...c, forecast };
   });
+  return { ...fpnaBase, categories };
 }
 
 function onScenarioChange(scen) {
@@ -213,13 +221,13 @@ function onScenarioChange(scen) {
 async function loadDashboard(sid) {
   show('dash-loading'); hide('dash-content');
   try {
-    const schoolsRes = api(`/api/schools?city=${S.city}&version=${S.version}`);
-    const fpnaRes = S.scenario !== 'base'
-      ? api('/api/recalculate', { method:'POST', headers:{'Content-Type':'application/json'}, body: scenarioBody() })
-      : api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`);
-    const [schools, fpna] = await Promise.all([schoolsRes, fpnaRes]);
-    S.dashCache[sid] = { fpna, schools: schools.schools };
-    renderDashboard(fpna, schools.schools);
+    const [fpnaBase, schoolsRes] = await Promise.all([
+      api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`),
+      api(`/api/schools?city=${S.city}&version=${S.version}`),
+    ]);
+    const fpna = applyScenarioTo(fpnaBase, S.scenario);
+    S.dashCache[sid] = { fpna, schools: schoolsRes.schools };
+    renderDashboard(fpna, schoolsRes.schools);
   } catch(e) { el('dash-loading').textContent = '⚠ ' + e.message; }
 }
 
@@ -506,9 +514,8 @@ function renderDashboard(fpna, schools) {
 async function loadFpna(sid) {
   show('fpna-loading'); hide('fpna-content');
   try {
-    const d = S.scenario !== 'base'
-      ? await api('/api/recalculate', { method:'POST', headers:{'Content-Type':'application/json'}, body: scenarioBody() })
-      : await api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`);
+    const base = await api(`/api/fpna/${sid}?city=${S.city}&version=${S.version}`);
+    const d = applyScenarioTo(base, S.scenario);
     S.fpnaCache[sid] = d;
     renderFpna(d);
   } catch(e) { el('fpna-loading').textContent = '⚠ ' + e.message; }
@@ -658,28 +665,19 @@ function resetAssumptions() {
 
 // ── Scenario projections ──────────────────────────
 async function loadScenarios() {
-  const scenIds = ['pessimistic', 'base', 'optimistic'];
-  // Compute via recalculate for each scenario
-  for (const scen of scenIds) {
-    const sc = SCENARIOS[scen];
-    try {
-      const scenarioSchools = S.inputSchools.map(s => ({
-        ...s, revenue_per_head: s.revenue_per_head * sc.rev_mult,
-      }));
-      const scenarioRatios = {};
-      Object.entries(S.inputRatios).forEach(([k, v]) => {
-        scenarioRatios[k] = v * sc.cost_mult;
-      });
-      const data = await api('/api/recalculate', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ schools: scenarioSchools, ratios: scenarioRatios }),
-      });
-      // Calculate full-year from the result
-      let rev=0, exp=0;
-      data.categories.forEach(c => {
-        const total = c.budget.reduce((s,x)=>s+x,0);
-        if (c.type === 'revenue') rev += total;
-        else exp += total;
+  try {
+    const base = await api(`/api/fpna/${S.school}?city=${S.city}&version=${S.version}`);
+    ['pessimistic', 'base', 'optimistic'].forEach(scen => {
+      const fpna = applyScenarioTo(base, scen);
+      let rev = 0, exp = 0;
+      fpna.categories.forEach(c => {
+        fpna.months.forEach((_, i) => {
+          const v = c.actual[i] != null ? c.actual[i]
+                  : c.forecast[i] != null ? c.forecast[i]
+                  : c.budget[i];
+          if (c.type === 'revenue') rev += v;
+          else                      exp += v;
+        });
       });
       const sur = rev - exp;
       const revEl = el(`sc-${scen}-rev`);
@@ -689,8 +687,8 @@ async function loadScenarios() {
         surEl.textContent = (sur >= 0 ? '+' : '') + shortEur(sur);
         surEl.style.color = sur >= 0 ? 'var(--green)' : 'var(--red)';
       }
-    } catch(e) { console.warn('Scenario load failed for', scen, e); }
-  }
+    });
+  } catch(e) { console.warn('Scenarios load failed:', e); }
 }
 
 // ════════════════════════════════════════════════
