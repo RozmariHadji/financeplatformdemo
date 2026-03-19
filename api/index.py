@@ -2,6 +2,7 @@ import os
 import random
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -625,4 +626,7 @@ def debug_paths():
     return result
 
 
-# Static files are served by Vercel natively (outputDirectory: "public" in vercel.json).
+# Serve frontend locally (on Vercel, outputDirectory handles statics before reaching FastAPI)
+_public = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "public"))
+if os.path.isdir(_public):
+    app.mount("/", StaticFiles(directory=_public, html=True), name="static")
