@@ -28,11 +28,14 @@
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 8a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1v-4zm8-8a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V4zm0 8a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
         Dashboard
       </button>
+      <button class="nav-item" data-tab="fpna" onclick="switchTab('fpna')">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 4a3 3 0 00-3 3v6a3 3 0 003 3h10a3 3 0 003-3V7a3 3 0 00-3-3H5zm-1 9v-1h5v2H5a1 1 0 01-1-1zm7 1h4a1 1 0 001-1v-1h-5v2zm0-4h5V8h-5v2zM9 8H4v2h5V8z" clip-rule="evenodd"/></svg>
+        FP&amp;A Engine
+      </button>
       <button class="nav-item" data-tab="input" onclick="switchTab('input')">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"/></svg>
         Data Input
       </button>
-
       <button class="nav-item" data-tab="ai" onclick="switchTab('ai')">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"/></svg>
         AI Insights
@@ -53,11 +56,15 @@
     <header class="topbar">
       <div class="topbar-left">
         <span id="topbar-title" class="topbar-title">Dashboard</span>
-        <span class="topbar-sub">Alpha Education Group · Apr–Dec 2025 (YTD)</span>
+        <span class="topbar-sub" id="topbar-sub">Alpha Education Group · Apr–Dec 2025 (YTD)</span>
       </div>
       <div class="topbar-right">
-        <div style="display: flex; gap: 8px;">
-          
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="scenario-select" class="gt-select scenario-select" onchange="onScenarioChange(this.value)" title="Scenario">
+            <option value="base">📊 Base Case</option>
+            <option value="optimistic">📈 Optimistic (+8% rev)</option>
+            <option value="pessimistic">📉 Pessimistic (−8% rev)</option>
+          </select>
           <select id="version-select" class="gt-select" onchange="onVersionChange(this.value)">
             <option value="ongoing_rolling">Ongoing Rolling Budget</option>
             <option value="initial_budget">Initial Budget</option>
@@ -68,7 +75,7 @@
             <option value="5_year">5 Year Budget Forecast</option>
           </select>
           <select id="date-select" class="gt-select" onchange="onDateChange(this.value)">
-            <option value="ytd">YTD (Apr-Dec)</option>
+            <option value="ytd">YTD (Apr–Dec)</option>
             <option value="full">Full Year View</option>
           </select>
           <select id="city-select" class="gt-select" onchange="onCityChange(this.value)">
@@ -110,7 +117,7 @@
               <canvas id="chart-surplus"></canvas>
             </div>
             <div class="chart-card">
-              <div class="chart-header"><span class="chart-title">Variance by Category</span><span class="chart-sub">YTD € vs budget</span></div>
+              <div class="chart-header"><span class="chart-title">Budget → Actual Bridge</span><span class="chart-sub">Surplus variance drivers · YTD</span></div>
               <canvas id="chart-variance"></canvas>
             </div>
           </div>
@@ -122,9 +129,27 @@
               <thead><tr>
                 <th>School</th><th>Segment</th><th class="num">Headcount</th>
                 <th class="num">YTD Revenue</th><th class="num">YTD Expenditure</th>
-                <th class="num">YTD Surplus</th><th class="num">Var %</th>
+                <th class="num">YTD Surplus</th><th class="num">Var %</th><th>Budget Use</th>
               </tr></thead>
               <tbody id="dash-schools-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ FP&A ENGINE ═══ -->
+      <section id="tab-fpna" class="tab-content">
+        <div id="fpna-loading" class="loading-state">Loading FP&amp;A data…</div>
+        <div id="fpna-content" style="display:none">
+          <div class="kpi-grid" id="fpna-kpis"></div>
+          <div class="section-header" style="margin-top:8px">
+            <span class="section-title">Monthly P&amp;L — Budget · Actual · Forecast</span>
+            <span class="section-sub">Cells: <span class="cell-a-pill">Actual</span> <span class="cell-f-pill">Forecast</span> <span class="cell-b-pill">Budget only</span></span>
+          </div>
+          <div class="card" style="overflow-x:auto">
+            <table class="gt-table fpna-table">
+              <thead id="fpna-thead"></thead>
+              <tbody id="fpna-tbody"></tbody>
             </table>
           </div>
         </div>
@@ -150,12 +175,46 @@
           </div>
         </div>
 
-        <div class="input-section">
-          <div class="section-header" style="margin-top:28px">
+        <div class="input-section" style="margin-top:24px">
+          <div class="section-header">
             <span class="section-title">Budget Allocation</span>
             <span class="section-sub">% of total revenue allocated to each expenditure category</span>
           </div>
           <div class="ratios-grid" id="ratios-grid"></div>
+        </div>
+
+        <!-- Scenario Projections -->
+        <div class="input-section" style="margin-top:28px">
+          <div class="section-header">
+            <span class="section-title">Year-End Scenario Projections</span>
+            <span class="section-sub">Based on current actuals + adjusted forecast assumptions</span>
+          </div>
+          <div class="scenarios-grid" id="scenarios-grid">
+            <div class="scenario-card pessimistic">
+              <div class="scenario-icon">📉</div>
+              <div class="scenario-label">Bear Case<div class="scenario-desc">−8% revenue · +5% costs</div></div>
+              <div class="scenario-value" id="sc-pessimistic-rev">—</div>
+              <div class="scenario-sub">Full-Year Revenue</div>
+              <div class="scenario-surplus" id="sc-pessimistic-sur">—</div>
+              <div class="scenario-sub">Surplus / (Deficit)</div>
+            </div>
+            <div class="scenario-card base active-scenario">
+              <div class="scenario-icon">📊</div>
+              <div class="scenario-label">Base Case<div class="scenario-desc">Current forecast assumptions</div></div>
+              <div class="scenario-value" id="sc-base-rev">—</div>
+              <div class="scenario-sub">Full-Year Revenue</div>
+              <div class="scenario-surplus" id="sc-base-sur">—</div>
+              <div class="scenario-sub">Surplus / (Deficit)</div>
+            </div>
+            <div class="scenario-card optimistic">
+              <div class="scenario-icon">📈</div>
+              <div class="scenario-label">Bull Case<div class="scenario-desc">+8% revenue · −3% costs</div></div>
+              <div class="scenario-value" id="sc-optimistic-rev">—</div>
+              <div class="scenario-sub">Full-Year Revenue</div>
+              <div class="scenario-surplus" id="sc-optimistic-sur">—</div>
+              <div class="scenario-sub">Surplus / (Deficit)</div>
+            </div>
+          </div>
         </div>
 
         <div class="input-actions">
@@ -179,7 +238,7 @@
               <button class="gt-btn gt-btn--ghost" id="btn-board" onclick="generateBoardCommentary()">📄 Board Commentary</button>
             </div>
           </div>
-          <div class="card" style="margin-bottom:24px">
+          <div class="card" style="margin-bottom:20px">
             <table class="gt-table">
               <thead><tr>
                 <th>Category</th><th>Type</th>
@@ -198,8 +257,32 @@
               </span>
               <span id="risk-badge"></span>
             </div>
-            <div class="ai-panel-body" id="ai-panel-body"></div>
+            <div class="ai-panel-body" id="ai-panel-body">
+              <div class="ai-placeholder">
+                <div style="font-size:28px;margin-bottom:10px;opacity:.3">✦</div>
+                <div style="font-weight:600;margin-bottom:6px;color:var(--muted)">Ready to analyse</div>
+                <div style="font-size:12.5px;color:var(--muted)">Click "Explain with AI" to generate a detailed narrative, or "Board Commentary" for a formal report.</div>
+              </div>
+            </div>
           </div>
+
+          <!-- AI Chat Panel -->
+          <div class="chat-panel" id="chat-panel">
+            <div class="chat-panel-header">
+              <span>✦ Ask the AI</span>
+              <span class="chat-hint">e.g. "Why is Direct Labor over budget?" · "What's our year-end outlook?" · "What actions should we take?"</span>
+            </div>
+            <div class="chat-messages" id="chat-messages">
+              <div class="chat-bubble ai">Hello! I'm your Grant Thornton financial AI. Ask me anything about this entity's budget performance, variances, or what actions to take.</div>
+            </div>
+            <div class="chat-input-row">
+              <input type="text" id="chat-input" class="chat-input"
+                placeholder="Ask about your finances…"
+                onkeydown="if(event.key==='Enter')sendChatMessage()">
+              <button class="gt-btn gt-btn--primary" id="btn-chat" onclick="sendChatMessage()">Ask ✦</button>
+            </div>
+          </div>
+
         </div>
       </section>
 

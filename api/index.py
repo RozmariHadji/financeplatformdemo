@@ -2,8 +2,6 @@ import os
 import random
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -527,8 +525,64 @@ def recalculate(req: RecalcRequest):
         "id": "group", "name": "Alpha Education Group (Updated)",
         "headcount": sum(s["headcount"] for s in custom_schools), "segment": "Multi-segment",
     }
-    return {"school": group_school, "months": m, "actual_months": am,
+    return {"school": group_school, "months": MONTHS, "actual_months": ACTUAL_MONTHS,
             "categories": list(merged.values())}
+
+
+# ── AI Chat ───────────────────────────────────────────────────────────────────
+class ChatRequest(BaseModel):
+    question: str
+    school_name: str = "Alpha Education Group"
+    context: dict = {}
+
+
+@app.post("/api/ai/chat")
+def ai_chat(req: ChatRequest):
+    if not gemini_client:
+        return {"answer": "⚠️ AI service not configured. Add your GEMINI_API_KEY to the .env file."}
+
+    ctx = req.context
+    ctx_lines = []
+    rev_a = ctx.get("revenue_actual", 0)
+    rev_b = ctx.get("revenue_budget", 0)
+    exp_a = ctx.get("exp_actual", 0)
+    exp_b = ctx.get("exp_budget", 0)
+    if rev_b:
+        ctx_lines.append(f"YTD Revenue: €{rev_a:,} vs Budget €{rev_b:,} ({(rev_a - rev_b) / rev_b * 100:+.1f}%)")
+    if exp_b:
+        ctx_lines.append(f"YTD Expenditure: €{exp_a:,} vs Budget €{exp_b:,} ({(exp_a - exp_b) / exp_b * 100:+.1f}%)")
+    if rev_a or exp_a:
+        surp = rev_a - exp_a
+        surp_b = rev_b - exp_b
+        ctx_lines.append(f"Net Surplus: €{surp:,} (Budget: €{surp_b:,})")
+    if ctx.get("headcount"):
+        ctx_lines.append(f"Headcount: {ctx['headcount']:,} students across {ctx.get('school_count', 4)} schools")
+    if ctx.get("top_variances"):
+        ctx_lines.append(f"Significant variances: {ctx['top_variances']}")
+
+    prompt = f"""You are a senior financial advisor from Grant Thornton specialising in FP&A for private schools in Cyprus.
+You are assisting the finance team at {req.school_name}.
+
+Organisation context:
+- Group of 4 private schools in Cyprus (Nicosia, Limassol, Larnaca), total ~2,470 students
+- Fiscal Year: April 2025 – March 2026 (9 months actuals Apr–Dec, 3 months forecast Jan–Mar)
+- Revenue model: tuition fee income, ~€4,500 per student per year
+- Cost structure: Direct Labor ~45%, Indirect Labor ~15%, Management ~8%, Facilities ~8%, Admin ~6%, Software ~4%
+- ERP system: SIMS
+
+Current financial position:
+{chr(10).join(ctx_lines) or 'No financial context provided.'}
+
+Finance team question: {req.question}
+
+Answer concisely (3–5 sentences). Quote specific figures where helpful. End with one clear action recommendation if appropriate.
+Tone: professional, direct — suitable for a Finance Director or Board Trustee."""
+
+    try:
+        resp = gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
+        return {"answer": resp.text}
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # ── Debug endpoint (remove after fixing) ──────────────────────────────────
@@ -571,17 +625,4 @@ def debug_paths():
     return result
 
 
-# ── Serve frontend ──────────────────────────────────────────────────────
-_public = None
-_candidates = [
-    os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "public")),
-    os.path.normpath(os.path.join(os.path.dirname(__file__), "public")),
-    "/var/task/public",
-]
-for _c in _candidates:
-    if os.path.isdir(_c):
-        _public = _c
-        break
-
-if _public:
-    app.mount("/", StaticFiles(directory=_public, html=True), name="static")
+# Static files are served by Vercel natively (outputDirectory: "public" in vercel.json).
