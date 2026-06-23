@@ -178,8 +178,11 @@ function onCityChange(v) {
 
 function onDateChange(v) {
   S.date = v;
-  if (S.tab === 'dashboard' && S.dashCache[S.school]) renderDashboard(S.dashCache[S.school].fpna, S.dashCache[S.school].schools);
-  if (S.tab === 'fpna'      && S.fpnaCache[S.school]) renderFpna(S.fpnaCache[S.school]);
+  if (S.tab === 'dashboard' && S.dashCache[S.school]) {
+    const c = S.dashCache[S.school];
+    renderDashboard(c.fpna, c.schools, c.fpnaBase);
+  }
+  if (S.tab === 'fpna' && S.fpnaCache[S.school]) renderFpna(S.fpnaCache[S.school]);
 }
 
 function onSchoolChange(v) {
@@ -210,6 +213,12 @@ function onScenarioChange(scen) {
   S.dashCache = {}; S.fpnaCache = {}; S.varCache = {};
   const sel = document.getElementById('scenario-select');
   sel.className = 'gt-select scenario-select ' + (scen !== 'base' ? SCENARIOS[scen].cls : '');
+  // Auto-switch to Full Year so forecast months are visible in charts
+  if (scen !== 'base' && S.date === 'ytd') {
+    S.date = 'full';
+    const ds = document.getElementById('date-select');
+    if (ds && !ds.disabled) ds.value = 'full';
+  }
   if (S.tab === 'dashboard') loadDashboard(S.school);
   if (S.tab === 'fpna')      loadFpna(S.school);
   if (S.tab === 'ai')        loadAi(S.school);
@@ -226,12 +235,12 @@ async function loadDashboard(sid) {
       api(`/api/schools?city=${S.city}&version=${S.version}`),
     ]);
     const fpna = applyScenarioTo(fpnaBase, S.scenario);
-    S.dashCache[sid] = { fpna, schools: schoolsRes.schools };
-    renderDashboard(fpna, schoolsRes.schools);
+    S.dashCache[sid] = { fpna, fpnaBase, schools: schoolsRes.schools };
+    renderDashboard(fpna, schoolsRes.schools, fpnaBase);
   } catch(e) { el('dash-loading').textContent = '⚠ ' + e.message; }
 }
 
-function renderDashboard(fpna, schools) {
+function renderDashboard(fpna, schools, fpnaBase = null) {
   let { months, actual_months:AM, categories } = fpna;
   let max_months = (S.date === 'ytd' && AM > 0) ? AM : months.length;
 
@@ -262,6 +271,26 @@ function renderDashboard(fpna, schools) {
   const revFullBudget = categories.filter(c=>c.type==='revenue').reduce((s,c)=>s+c.budget.reduce((a,x)=>a+x,0),0);
   const expFullBudget = categories.filter(c=>c.type==='expenditure').reduce((s,c)=>s+c.budget.reduce((a,x)=>a+x,0),0);
   const surpFullBudget = revFullBudget - expFullBudget;
+
+  // ── Scenario delta vs base ────────────────────
+  let surpYEBase = surpYE;
+  if (fpnaBase && S.scenario !== 'base') {
+    let rBase = 0, eBase = 0;
+    fpnaBase.categories.forEach(c => {
+      fpnaBase.months.forEach((_, i) => {
+        const v = c.actual[i] != null ? c.actual[i]
+                : c.forecast[i] != null ? c.forecast[i]
+                : c.budget[i];
+        if (c.type === 'revenue') rBase += v;
+        else                      eBase += v;
+      });
+    });
+    surpYEBase = rBase - eBase;
+  }
+  const scenDelta = surpYE - surpYEBase;
+  const scenDeltaHtml = (fpnaBase && S.scenario !== 'base' && Math.abs(scenDelta) > 100)
+    ? `<div class="kpi-scenario-delta ${scenDelta >= 0 ? 'pos' : 'neg'}">${scenDelta >= 0 ? '▲' : '▼'} ${shortEur(Math.abs(scenDelta))} vs base</div>`
+    : '';
 
   // ── Efficiency KPIs ───────────────────────────
   const opMargin    = revA > 0 ? (surpA / revA * 100) : 0;
@@ -310,6 +339,7 @@ function renderDashboard(fpna, schools) {
       <div class="kpi-value">${shortEur(surpYE)}</div>
       <div class="kpi-sub">Budget: ${shortEur(surpFullBudget)}</div>
       ${delta(surpYE, surpFullBudget, 'revenue')}
+      ${scenDeltaHtml}
       ${chip(surInsight(surpYE, surpFullBudget))}
     </div>
     <div class="kpi-card ${costPerStud<=costPerStudBud?'green':'amber'}">
@@ -323,7 +353,10 @@ function renderDashboard(fpna, schools) {
   // ── AI strip ─────────────────────────────────
   const stripEl = el('dash-ai-strip');
   if (stripEl) {
-    const scenLabel = S.scenario !== 'base' ? ` · <strong>${SCENARIOS[S.scenario].label} active</strong>` : '';
+    const sc = SCENARIOS[S.scenario];
+    const scenLabel = S.scenario !== 'base'
+      ? ` · <strong style="color:${scenDelta>=0?'var(--green)':'var(--red)'}">${sc.label}: ${scenDelta>=0?'▲':'▼'} ${shortEur(Math.abs(scenDelta))} year-end impact</strong>`
+      : '';
     const items = [
       { ins:insRev,  label:'Revenue' }, { ins:insExp, label:'Expenditure' },
       { ins:insSurp, label:'Surplus' },

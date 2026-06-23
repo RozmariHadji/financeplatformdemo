@@ -630,3 +630,7 @@ def debug_paths():
 _public = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "public"))
 if os.path.isdir(_public):
     app.mount("/", StaticFiles(directory=_public, html=True), name="static")
+
+# Vercel ASGI adapter — must be named "handler"
+from mangum import Mangum
+handler = Mangum(app, lifespan="off")
